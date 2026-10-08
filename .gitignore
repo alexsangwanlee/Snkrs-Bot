@@ -1,4 +1,5 @@
-geckodriver.log
-pip-selfcheck.json
-venv
-.idea
+bin/
+obj/
+artifacts/
+*.user
+.vs/

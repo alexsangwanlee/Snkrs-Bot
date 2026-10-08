@@ -1,139 +1,73 @@
-# PLEASE READ!
+# 원랜디 조합 도우미
 
+워크래프트3 유즈맵 **원피스 랜덤 디펜스(원랜디)** 조합 도우미입니다.
+워크3를 켜면 내 패를 자동으로 읽고, OX 조합기·TMO 조합도우미처럼 전 유닛을 보여주면서
+**효율 좋은 목표**, **유카0을 볼 수 있는 조합**, **지금 누를 조합 키**를 알려줍니다.
 
-This is a Selenium bot for buying a given sneaker from the Nike Snkrs website ON RELEASE DAY.
-   It will not work for sneakers that are past their release day (or later in the release day).
-   `Please note that this script was written with the US site in mind, so Nike sites for other countries will likely cause problems.`
-   This is because the purchase page changes to where the buy button redirects to a seperate checkout page (as opposed to a direct buy popup during release).
-It is a commandline script written solely in python. `Please run with python 3.7.`
-There are 6 selenium drivers in the bin directory for both Chrome and Firefox on Linux, MacOS, and Winows. `The drivers for other operating systems need to be installed from the instructions below.`
-I have found the Firefox driver for MacOS works best.
+> 게임을 **읽기만** 합니다. 메모리 쓰기·주입·키 입력 대행은 하지 않습니다. 조합 키는 직접 누르세요.
 
-Ideally, some pieces (or all?) of this could be replaced with direct Nike API requests instead of Selenium. However, I've found that Nike APIs are not very straightforward.
+## 탭
 
+| 탭 | 내용 |
+|---|---|
+| **조합도우미** | 전 유닛을 등급·딜 타입별 열로 펼친 OX 조합기 형식. 체크 = 보유, 줄 클릭 +1 / 우클릭 −1. 금색 = 지금 조합 가능. 유닛을 누르면 조합 트리(✔/✘), 단축키·채팅 명령, 재료로 쓰이는 곳, 패 능력치 합계 |
+| **효율 추천** | 상위 유닛별 `효율 = 유카0 확률 ÷ (지금 패에서 더 모아야 할 흔함 환산 비용 + 1)`. 진행률·남은 비용·다음 행동 |
+| **유카0 조합** | TMO 클리어 기록 40,026판을 상위 구성(예: 징베 + 킹)으로 묶어 유카0 비율 순으로. 유카0 판에서 같이 쓴 유닛과 지금 패의 진행률 |
+| **자동 조합** | 목표(직접 고르거나 효율 1위 자동)까지의 조합 순서를 패가 바뀔 때마다 다시 계산. `[루피] 선택 → Z` 처럼 지금 할 조합을 위에서부터. **미니 오버레이**로 게임 위에 띄우기 |
 
-# Getting started
+**유카** = 클리어 순간 필드에 남은 적 유닛 수. 유카 0 = 매 라운드를 다 잡고 깬 판입니다.
 
-There are a few requirements to run the bot. First, you'll need to install `Python 3.7` or greater. The instructions below show you how to do this in several operating systems
+![조합도우미](docs/helper.png)
+![효율 추천](docs/efficiency.png)
+![유카0 조합](docs/yuka0.png)
+![자동 조합 + 미니 오버레이](docs/auto.png)
 
-Next, we have provided the web drivers for MacOS, Linux, and Windows, but if they're not there, or you want something more up-to-date than the included drivers, you'll need to download them yourself with the instructions below
+## 사용법
 
-Finally, the program is run from the terminal (command line), so you should familiarize yourself with running python programs from the terminal [here](https://realpython.com/run-python-scripts/)
+1. [Actions](../../actions) 또는 Releases에서 `OrdHelper-win-x64.zip`을 받아 압축을 풀고 `OrdHelper.exe` 실행 (Windows 10/11 x64, 설치 불필요).
+2. 워크래프트3에서 원랜디를 시작하면 상단에 `WC3 … · 1P · 유닛 N`이 뜨고 패가 자동으로 채워집니다.
+   - 내 플레이어 번호가 1P가 아니면 상단 **슬롯**에서 고르세요.
+   - 인식이 안 되거나 틀리면 **WC3 자동 인식**을 끄고 조합도우미 탭에서 직접 O/X로 찍으면 됩니다.
+3. 게임 중에는 **미니 오버레이**(드래그로 이동, 우클릭 닫기)를 켜 두고, 워크3는 *창 모드* 또는 *전체 창 모드*로 실행하세요.
 
-## Downloading python
+### 워크3 인식 지원 범위
 
+| 워크3 빌드 | 상태 |
+|---|---|
+| 2.0.4.23745 | 참고 저장소에서 검증된 배치 + 로컬 플레이어 자동 판별 |
+| 3.0.0.24268 | 실측 배치(유닛 풀 +0xC08/+0xC10). 로컬 슬롯은 **슬롯** 설정 사용 |
+| 그 밖 | 위 두 배치를 차례로 시도(실험). 상태줄에 `미검증 빌드` 표시 |
 
-This needs to be Python version `3.7` or up
+`Warcraft III.exe`가 관리자 권한으로 실행 중이면 이 프로그램도 관리자 권한으로 실행해야 읽을 수 있습니다.
 
-MacOS
-   * From Python's official website [here](https://www.python.org/downloads/mac-osx/)
-   * If you have [brew](https://brew.sh) installed, you can just run the coommand `brew install python3`
+## 빌드
 
-Linux
-   * From Python's official website [here](https://www.python.org/downloads/source/)
-   * Using the package manager for your system. With Ubuntu, this command is `sudo apt install python3-dev`
+```bash
+dotnet test tests/OrdHelper.Core.Tests          # 조합/통계 로직 (모든 OS)
+dotnet publish src/OrdHelper.App -c Release -r win-x64 --self-contained true -o publish
+```
 
-Windows
-   * From Python's official website [here](https://www.python.org/downloads/windows/)
-   * If you have the [Chocolatey package manager](https://chocolatey.org/) installed, you can run `choco install python`
+UI는 XAML 없이 코드로만 작성해 리눅스에서도 컴파일됩니다(`EnableWindowsTargeting`). 실행은 Windows 전용.
 
-1. The selenium webdrivers for your chosen browser
+데이터 갱신: `python3 tools/build_data.py <onepiece-random-defense-overlay>/Data` → `Data/ord-data.json`, `Data/images/` 재생성.
 
+## 구조
 
-## Installing the web drivers
+```
+src/OrdHelper.Core   데이터 로드, 조합 계획(Crafting), 효율·유카0 통계(Insights), RTTI 파서
+src/OrdHelper.App    WPF 화면 4탭 + 미니 오버레이, 워크3 읽기 전용 리더(Wc3Reader)
+tests/               xUnit
+tools/build_data.py  참고 저장소 Data → Data/ord-data.json
+```
 
-* The drivers for most browsers can be found on selenium's site [here](https://www.selenium.dev/documentation/en/getting_started_with_webdriver/browsers/), although at the moment, only Firefox and Chrome are supported
+## 알려진 한계
 
-* NOTE: There are already webdrivers for Chrome and Firefox, for MacOS, Linux, and Windows, which will be loaded if no other webdriver is specified manually
+- 흔함 환산 비용은 등급별 어림값(조합식 없는 특별함·희귀함 = 4, 랜덤유닛 = 4 등)입니다.
+- 아이템·상위 수 제한·동시 보유 금지·랜덤전용 선택 같은 조건은 자동 판정하지 않고 "조건"으로 안내만 합니다.
+- 클리어 기록은 2026-08-18 기준 14일치 TMO 공개 기록이며, 신·악몽·지옥 클리어 판만 포함합니다.
+- 능력치 합계는 TMO 조합도우미 표기값의 단순 합(중첩 규칙 미반영)입니다.
 
-# Usage
+## 고지
 
-1. Make sure that you have done all the Pre-installation requirements in the `Getting Started` section above
-
-1. Clone this repository's source code
-   1. If you have git installed, this can be done as easily as `git clone https://github.com/alexschimpf/Snkrs-Bot`
-   1. Otherwise, download the zipped source code and unzip it
-
-1. Navigate to the project's code
-   * `cd path/to/downloaded/project`
-
-1. Install all the Python dependencies by running
-  * `pip install -r requirements.txt`
-
-1. Run the bot
-   * Replace all the fields in the command below with the options that you want, and any of the configuration options listed below
-   ```bash
-   python3 main.py --username myemail@gmail.com --password abc123 --url <your-shoes-url> --shoe-size 6 --driver-type chrome
-   ```
-
-# Configuration options
-
-Here is a list and description of the different arguments to use for the script:
-
-<b>--username</b>
-* Username for login
-
-<b>--password</b>
-* Password for login
-
-<b>--url</b>
-* URL for desired shoe
-* Size parameter can also be passed in (for example: https://www.nike.com/launch/t/kobe-5-protro-bruce-lee?size=11). In this case, `--shoe-size` and `--shoe-type` will be ignored
-* DO NOT pass in size parameter with url on releases with "Additional Size Ranges" (i.e. children's shoes on same page) as it can lead to unexpected results
-
-<b>--shoe-size</b>
-* Self-explanatory
-
-<b>--shoe-type</b>
-* Men's (M), Women's (W), Youth (Y) or Child (C)
-* For special releases (i.e. Air Presto), can pass in XXS, XS, S, M, L or XL. You do not need to pass in shoe size
-
-<b>--cvv</b>
-* Card Verification Value for your stored credit card
-* May not be needed in some cases (for example, if you have previously purchased a release with a stored credit card)
-
-<b>--shipping-option</b>
-* STANDARD, TWO_DAY or NEXT_DAY
-
-<b>--shipping-address</b>
-* If given, the bot will attempt to add a new shipping address in some scenarios
-* In some cases, checkout will not proceed without adding a new shipping address. If you are unsure, include it
-* Must be in this format: '{"first_name":"John", "last_name":"Doe", "address":"1313 Mockingbird Lane", "apt":"", "city":"Long Beach", "state":"CA", "zip_code":"90712", "phone_number":"9999999999"}'
-
-<b>--login-time</b>
-* If given, the bot will pause until a specific time before it logs in (can be any datetime format)
-
-<b>--release-time</b>
-* If given, the bot will pause until a specific time before it purchase the sneaker (can be any datetime format)
-
-<b>--screenshot-path</b>
-* If given, the bot will take a screenshot of the page after purchasing and save it at the given file path (may be useful for debugging)
-
-<b>--html-path</b>
-* If given, the bot will take the page source after purchasing and save it at the given file path (may be useful for debugging)
-
-<b>--page-load-timeout</b>
-* This is used to limit the page load time (in seconds), which can be useful when the page is still loading, but the UI is nevertheless useable. This is pretty much a necessity as I've noticed Nike's pages hang all the time. I'd recommend using 1-3 seconds for this.
-
-<b>--driver-type</b>
-* Should be 'firefox' or 'chrome' (the OS will be determined for you)
-* Defaults to `Firefox` if nothing is specified
-
-<b>--webdriver-path</b>
-* If specified, will use the specified driver instead of the defaults
-* NOTE: The driver should match the browser specified in the `--driver-type` option (defaults to Firefox)
-
-<b>--headless</b>
-* This will run the driver in headless mode, which should make the bot quicker
-
-<b>--select-payment</b>
-* If you already have your payment options pre-saved on your Nike account, DO NOT use this. If for some reason you don't have it pre-saved (even though it will cost the bot more time) the bot will select the first payment option it finds.
-
-<b>--purchase</b>
-* If this argument is given, the bot WILL attempt to purchase the shoe so USE WITH CAUTION!
-
-<b>--num-retries</b>
-* If the bot fails for some reason, it will retry any number of times or until successful
-
-<b>--dont-quit</b>
-* Prevent browser from closing. Please note, if you are passing the `--purchase` parameter, it may be necessary to pass this parameter in
+비공식 팬 도구입니다. 원피스 랜덤 디펜스 제작진, 티모지지(TMO.GG)와 관련이 없습니다.
+데이터·리더 알고리즘 출처와 라이선스는 [NOTICE.md](NOTICE.md)를 보세요. 라이선스: [MIT](LICENSE)

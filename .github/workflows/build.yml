@@ -1,0 +1,36 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Test
+        run: dotnet test tests/OrdHelper.Core.Tests -c Release
+      - name: Publish (Windows x64, .NET 런타임 포함)
+        run: dotnet publish src/OrdHelper.App -c Release -r win-x64 --self-contained true -o publish/OrdHelper
+      - name: Zip
+        run: Compress-Archive -Path publish/OrdHelper -DestinationPath OrdHelper-win-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OrdHelper-win-x64
+          path: OrdHelper-win-x64.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: OrdHelper-win-x64.zip
