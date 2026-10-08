@@ -17,7 +17,7 @@ public sealed class MainWindow : Window
     private nint _hwnd;
     private readonly TabControl _tabs = new() { Margin = new Thickness(8, 0, 8, 0) };
     private readonly List<Action> _refreshers = [];
-    private readonly TextBlock _status = Ui.Text("워크래프트3 확인 중…", 12, color: Ui.Muted);
+    private readonly TextBlock _status = Ui.Text("워크3 확인 중", 12, color: Ui.Muted);
     private readonly CancellationTokenSource _closing = new();
     private OverlayWindow? _overlay;
     private byte? _slot;
@@ -42,7 +42,7 @@ public sealed class MainWindow : Window
         AddTab("조합도우미", new HelperTab(state));
         AddTab("효율 추천", new EfficiencyTab(state));
         AddTab("유카0 조합", new Yuka0Tab(state));
-        AddTab("자동 조합", new AutoTab(state, _runner, () => _hotkey, ToggleOverlay));
+        AddTab("자동 조합", new AutoTab(state, _runner, () => _hotkey));
         _tabs.SelectionChanged += (_, e) =>
         {
             if (ReferenceEquals(e.OriginalSource, _tabs)) RefreshSelected();
@@ -51,6 +51,7 @@ public sealed class MainWindow : Window
         {
             RefreshSelected();
             _overlay?.Refresh();
+            _runner.Invalidate();
             _runner.Tick();
         };
         _runner.Changed += () =>
@@ -60,7 +61,7 @@ public sealed class MainWindow : Window
         };
         state.TabRequested += index => _tabs.SelectedIndex = index;
 
-        var auto = new CheckBox { Content = "WC3 자동 인식", IsChecked = true, Margin = new Thickness(12, 0, 4, 0) };
+        var auto = new CheckBox { Content = "워크3 자동 인식", IsChecked = true, Margin = new Thickness(12, 0, 4, 0) };
         auto.Click += (_, _) =>
         {
             state.AutoSync = auto.IsChecked == true;
@@ -73,15 +74,22 @@ public sealed class MainWindow : Window
         topmost.Click += (_, _) => Topmost = topmost.IsChecked == true;
 
         var header = new DockPanel { Margin = new Thickness(10, 8, 10, 8) };
-        var hotkey = Ui.Choice(Hotkeys.Keys, _hotkey, value =>
+        ComboBox? hotkey = null;
+        hotkey = Ui.Choice(Hotkeys.Keys, _hotkey, value =>
         {
-            _hotkey = value;
-            RegisterHotkey();
+            if (value == _hotkey || RegisterHotkey(value)) _hotkey = value;
+            else hotkey!.SelectedItem = _hotkey; // 새 키를 못 잡으면 예전 키 유지
             RefreshSelected();
         });
         hotkey.ToolTip = "자동 실행 켜기/끄기 단축키 (게임 중에도 동작)";
-        var controls = Ui.Row(auto, Ui.Text("슬롯", 12), slot, Ui.Text("자동 실행 키", 12), hotkey, topmost,
-            Ui.Button("미니 오버레이", ToggleOverlay), Ui.Button("새로고침", Reload));
+        TextBlock Label(string text)
+        {
+            var label = Ui.Text(text, 12, color: Ui.Muted);
+            label.Margin = new Thickness(14, 0, 0, 0);
+            return label;
+        }
+        var controls = Ui.Row(auto, Label("내 번호"), slot, Label("자동 실행 키"), hotkey, topmost,
+            Ui.Button("오버레이 열기", ToggleOverlay), Ui.Button("새로고침", Reload));
         controls.Margin = new Thickness(0);
         DockPanel.SetDock(controls, Dock.Right);
         header.Children.Add(controls);
@@ -121,7 +129,7 @@ public sealed class MainWindow : Window
                 }
                 return 0;
             });
-            RegisterHotkey();
+            RegisterHotkey(_hotkey);
         };
         Closed += (_, _) =>
         {
@@ -179,14 +187,19 @@ public sealed class MainWindow : Window
                     }, token);
                 }
                 catch (OperationCanceledException) { return; }
-                catch (Exception e) { result = new Wc3Status($"WC3 읽기 오류: {e.Message}", null, true); }
+                catch (Exception e) { result = new Wc3Status($"워크3 읽기 오류: {e.Message}", null, true); }
                 _status.Text = result.Message;
                 _status.Foreground = result.Error ? Ui.Bad : result.Hand is null ? Ui.Muted : Ui.Ok;
-                if (!SameHand(result.Hand, _state.Live))
+                // 여기서 예외가 새면 읽기 루프가 조용히 멈춘다: 잡아서 새로고침하고 계속 돈다.
+                try
                 {
-                    _state.Live = result.Hand;
-                    _state.Notify();
+                    if (!SameHand(result.Hand, _state.Live))
+                    {
+                        _state.Live = result.Hand;
+                        _state.Notify();
+                    }
                 }
+                catch (Exception e) { Recover(e); }
             }
             else
             {
@@ -201,15 +214,24 @@ public sealed class MainWindow : Window
 
     private const int HotkeyId = 0x4F52;
 
-    private void RegisterHotkey()
+    /// <summary>새 키를 먼저 잡고, 성공했을 때만 예전 키를 놓는다.</summary>
+    private bool RegisterHotkey(string key)
     {
-        if (_hwnd == 0) return;
-        UnregisterHotKey(_hwnd, HotkeyId);
-        if (!RegisterHotKey(_hwnd, HotkeyId, 0x4000 /* MOD_NOREPEAT */, Hotkeys[_hotkey]))
+        if (_hwnd == 0) return false;
+        var id = key == _hotkey ? HotkeyId : HotkeyId + 1;
+        if (!RegisterHotKey(_hwnd, id, 0x4000 /* MOD_NOREPEAT */, Hotkeys[key]))
         {
-            _status.Text = $"단축키 {_hotkey} 를 다른 프로그램이 쓰고 있습니다. 다른 키를 고르세요.";
+            _status.Text = $"단축키 {key}: 다른 프로그램이 쓰는 중입니다. 다른 키를 고르세요.";
             _status.Foreground = Ui.Bad;
+            return false;
         }
+        if (id != HotkeyId)
+        {
+            UnregisterHotKey(_hwnd, HotkeyId);
+            UnregisterHotKey(_hwnd, id);
+            RegisterHotKey(_hwnd, HotkeyId, 0x4000, Hotkeys[key]);
+        }
+        return true;
     }
 
     [DllImport("user32.dll")]
@@ -222,6 +244,7 @@ public sealed class MainWindow : Window
     private void Reload()
     {
         _resetReader = true;
+        _state.Live = null; // 다시 읽기 전까지 예전 패로 판단하지 않는다
         _status.Text = "새로고침 중";
         _state.Notify();
     }
@@ -230,11 +253,14 @@ public sealed class MainWindow : Window
     public void Recover(Exception error)
     {
         Program.Log(error);
+        if (_runner.Armed) _runner.Toggle(); // 같은 오류로 입력을 반복하지 않게 자동 실행은 끈다
         _status.Text = $"오류가 나서 새로고침했습니다 ({error.Message}). 기록: {Program.LogPath}";
         _status.Foreground = Ui.Bad;
         if (DateTime.UtcNow - _lastRecover < TimeSpan.FromSeconds(2)) return;
         _lastRecover = DateTime.UtcNow;
-        Reload();
+        // 복구 중 다시 그리기가 또 실패해도 여기서 끝낸다 (처리기 안의 예외는 앱을 종료시킨다).
+        try { Reload(); }
+        catch (Exception again) { Program.Log(again); }
     }
 
     private static bool SameHand(IReadOnlyDictionary<string, int>? a, IReadOnlyDictionary<string, int>? b) =>

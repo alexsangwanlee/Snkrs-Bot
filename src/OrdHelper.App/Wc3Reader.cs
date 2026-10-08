@@ -46,6 +46,8 @@ public sealed class Wc3Reader : IDisposable
     private int _emptyReads;
     private DateTime _nextScan = DateTime.MinValue;
     private int _errors;
+    // 스캔 스레드마다 16MB 버퍼 하나를 계속 쓴다 (작업 단위마다 새로 만들지 않게).
+    [ThreadStatic] private static byte[]? _scanBuffer;
 
     public Wc3Reader(GameData data) => _data = data;
 
@@ -54,22 +56,28 @@ public sealed class Wc3Reader : IDisposable
     {
         try
         {
-            if (!Attach()) return new("워크래프트3 실행 안 됨", null);
+            if (!Attach()) return new("워크3 실행 안 됨", null);
             if (_root == 0)
             {
-                if (DateTime.UtcNow < _nextScan) return new($"WC3 {_version} · 게임 대기 중", null);
+                if (DateTime.UtcNow < _nextScan) return new($"워크3 {_version} · 게임 대기 중", null);
                 // 전체 힙 스캔은 무겁다: 대기 중에는 15초에 한 번만.
                 _nextScan = DateTime.UtcNow.AddSeconds(15);
-                if (!LocateRoot()) return new($"WC3 {_version} · 게임 대기 중 (유닛 없음)", null);
+                if (!LocateRoot()) return new($"워크3 {_version} · 게임 대기 중 (유닛 없음)", null);
             }
             var local = slot ?? TryLocalSlot() ?? 0;
-            var hand = ReadHand(local);
+            // 읽는 사이 유닛이 생기거나 없어지면 다시 읽는다 (전체 재탐색은 무거우니 하지 않는다).
+            Dictionary<string, int>? hand = null;
+            for (var attempt = 0; hand is null; attempt++)
+            {
+                try { hand = ReadHand(local); }
+                catch (ListChangedException) when (attempt < 3) { }
+            }
             // 판이 바뀌면 풀 위치가 바뀔 수 있다. 계속 비어 있으면 다시 찾는다.
             _emptyReads = hand.Count == 0 ? _emptyReads + 1 : 0;
             if (_emptyReads > 10) { _root = 0; _emptyReads = 0; }
             _errors = 0;
             var tag = _layout!.Verified ? "" : " · 미검증 빌드(실험)";
-            return new($"WC3 {_version} · {local + 1}P · 유닛 {hand.Values.Sum()}{tag}", hand);
+            return new($"워크3 {_version} · {local + 1}P · 유닛 {hand.Values.Sum()}{tag}", hand);
         }
         catch (Exception e) when (e is Win32Exception or InvalidDataException or InvalidOperationException
                                       or OverflowException or ArgumentOutOfRangeException)
@@ -77,7 +85,7 @@ public sealed class Wc3Reader : IDisposable
             _root = 0;
             // 연속으로 실패하면 프로세스에 처음부터 다시 붙는다 (게임 재시작·맵 변경 대응).
             if (++_errors >= 3) Reset();
-            return new($"WC3 읽기 실패, 다시 연결 중: {e.Message}", null, true);
+            return new($"워크3 읽기 실패, 다시 연결 중: {e.Message}", null, true);
         }
     }
 
@@ -172,7 +180,7 @@ public sealed class Wc3Reader : IDisposable
                 hand[code] = hand.GetValueOrDefault(code) + 1;
         }
         if (_memory.ReadInt32(_root + (ulong)l.CountOffset) != count)
-            throw new InvalidDataException("읽는 중 유닛 목록이 바뀌었습니다.");
+            throw new ListChangedException();
         return hand;
     }
 
@@ -189,7 +197,8 @@ public sealed class Wc3Reader : IDisposable
             () =>
             {
                 Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
-                return (Units: new Dictionary<ulong, byte>(), Structs: new List<(ulong, int, ulong)>(), Buffer: new byte[ProcessMemory.ChunkBytes]);
+                return (Units: new Dictionary<ulong, byte>(), Structs: new List<(ulong, int, ulong)>(),
+                    Buffer: _scanBuffer ??= new byte[ProcessMemory.ChunkBytes]);
             },
             (region, _, local) =>
             {
@@ -273,6 +282,8 @@ public sealed class Wc3Reader : IDisposable
     }
 
     public void Dispose() => Detach();
+
+    private sealed class ListChangedException() : InvalidOperationException("읽는 중 유닛 목록이 바뀌었습니다.");
 }
 
 /// <summary>ReadProcessMemory / VirtualQueryEx 래퍼. 읽기 권한만 요청한다.</summary>
@@ -284,7 +295,7 @@ internal sealed class ProcessMemory : IDisposable
     public static ProcessMemory Open(int processId)
     {
         var handle = OpenProcess(0x0010 | 0x0400, false, processId); // VM_READ | QUERY_INFORMATION
-        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "워크래프트3 프로세스를 열 수 없습니다. 워크3가 관리자 권한이면 이 프로그램도 관리자로 실행하세요.");
+        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "워크3 프로세스를 열 수 없습니다. 워크3가 관리자 권한이면 이 프로그램도 관리자로 실행하세요.");
         return new ProcessMemory(handle);
     }
 

@@ -21,7 +21,7 @@ public static class Input
             using var process = Process.GetProcessById((int)pid);
             return process.ProcessName == ProcessName ? hwnd : 0;
         }
-        catch (ArgumentException) { return 0; }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException) { return 0; } // 그새 종료됨
     }
 
     /// <summary>
@@ -32,35 +32,43 @@ public static class Input
     {
         var hwnd = ForegroundWc3();
         if (hwnd == 0 || !GetClientRect(hwnd, out var rect)) return false;
+        // 오버레이 등 다른 창 위를 누른 것은 게임 클릭이 아니다.
+        if (GetAncestor(WindowFromPoint(new POINT { X = x, Y = y }), 2 /* GA_ROOT */) != hwnd) return false;
         var origin = new POINT();
         ClientToScreen(hwnd, ref origin);
         return x >= origin.X && x < origin.X + rect.Right && y >= origin.Y && y < origin.Y + rect.Bottom * 0.78;
     }
 
-    /// <summary>키 한 번. 스캔코드로 보내야 게임 단축키가 한/영 상태와 무관하게 먹는다.</summary>
-    public static void Tap(char key)
+    /// <summary>키 한 번. 스캔코드로 보내야 게임 단축키가 한/영 상태와 무관하게 먹는다. 워크3가 앞에 없으면 false.</summary>
+    public static bool Tap(char key)
     {
+        var hwnd = ForegroundWc3();
         var vk = (ushort)(VkKeyScan(char.ToLowerInvariant(key)) & 0xFF);
         var scan = (ushort)MapVirtualKey(vk, 0);
-        Send(Key(scan, KeyScanCode), Key(scan, KeyScanCode | KeyUp));
+        return Send(hwnd, Key(scan, KeyScanCode), Key(scan, KeyScanCode | KeyUp));
     }
 
-    public static void Enter() => Send(Key(0x1C, KeyScanCode), Key(0x1C, KeyScanCode | KeyUp));
-
-    /// <summary>채팅 명령: Enter → 글자(유니코드라 IME 영향 없음) → Enter.</summary>
-    public static void Chat(string text)
+    /// <summary>채팅 명령: Enter → 글자(유니코드라 IME 영향 없음) → Enter. 중간에 워크3가 뒤로 가면 멈추고 false.</summary>
+    public static bool Chat(string text)
     {
-        Enter();
+        var hwnd = ForegroundWc3();
+        if (!Enter(hwnd)) return false;
         Thread.Sleep(80);
-        foreach (var c in text) Send(Unicode(c, 0), Unicode(c, KeyUp));
+        foreach (var c in text)
+            if (!Send(hwnd, Unicode(c, 0), Unicode(c, KeyUp))) return false;
         Thread.Sleep(40);
-        Enter();
+        return Enter(hwnd);
     }
 
-    private static void Send(params INPUT[] inputs)
+    private static bool Enter(nint hwnd) => Send(hwnd, Key(0x1C, KeyScanCode), Key(0x1C, KeyScanCode | KeyUp));
+
+    /// <summary>보내기 직전에 워크3가 여전히 맨 앞인지 확인한다. 아니면 보내지 않는다.</summary>
+    private static bool Send(nint wc3, params INPUT[] inputs)
     {
+        if (wc3 == 0 || GetForegroundWindow() != wc3) return false;
         if (SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>()) != inputs.Length)
             throw new InvalidOperationException($"입력 전송 실패 ({Marshal.GetLastWin32Error()}). 워크3가 관리자 권한이면 이 프로그램도 관리자로 실행하세요.");
+        return true;
     }
 
     private const uint KeyUp = 0x0002, KeyUnicode = 0x0004, KeyScanCode = 0x0008;
@@ -119,6 +127,12 @@ public static class Input
     [DllImport("user32.dll")]
     private static extern bool ClientToScreen(nint hwnd, ref POINT point);
 
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(POINT point);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetAncestor(nint hwnd, uint flags);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern uint SendInput(uint count, INPUT[] inputs, int size);
 
@@ -138,19 +152,35 @@ public static class Input
 
 /// <summary>
 /// 실제 마우스 왼쪽 클릭(뗄 때)을 알려주는 전역 저수준 훅. 자동 실행 중에만 건다.
+/// 전용 스레드의 메시지 루프에서 돌려서 UI가 바빠도 마우스가 끊기지 않고 Windows가 훅을 떼지 않는다.
 /// 프로그램이 보낸 클릭(INJECTED)은 무시한다.
 /// </summary>
 public sealed class MouseHook : IDisposable
 {
     private readonly HookProc _proc;
-    private readonly nint _hook;
     private readonly Action<int, int> _onLeftClick;
+    private readonly System.Windows.Threading.Dispatcher _ui;
+    private uint _threadId;
+    private nint _hook;
+
+    public bool Installed => _hook != 0;
 
     public MouseHook(Action<int, int> onLeftClick)
     {
         _onLeftClick = onLeftClick;
+        _ui = System.Windows.Threading.Dispatcher.CurrentDispatcher;
         _proc = Callback; // 대리자가 GC되지 않게 필드로 붙잡아 둔다
-        _hook = SetWindowsHookEx(14, _proc, GetModuleHandle(null), 0); // WH_MOUSE_LL
+        using var ready = new ManualResetEventSlim();
+        new Thread(() =>
+        {
+            _threadId = GetCurrentThreadId();
+            _hook = SetWindowsHookEx(14, _proc, GetModuleHandle(null), 0); // WH_MOUSE_LL
+            ready.Set();
+            if (_hook == 0) return;
+            while (GetMessage(out var message, 0, 0, 0) > 0) DispatchMessage(ref message);
+            UnhookWindowsHookEx(_hook);
+        }) { IsBackground = true, Name = "mouse hook" }.Start();
+        ready.Wait();
     }
 
     private nint Callback(int code, nint message, nint data)
@@ -159,14 +189,14 @@ public sealed class MouseHook : IDisposable
         {
             var info = Marshal.PtrToStructure<MouseInfo>(data);
             if ((info.Flags & 1) == 0) // LLMHF_INJECTED 아님
-                System.Windows.Application.Current.Dispatcher.BeginInvoke(() => _onLeftClick(info.Point.X, info.Point.Y));
+                _ui.BeginInvoke(() => _onLeftClick(info.Point.X, info.Point.Y));
         }
         return CallNextHookEx(_hook, code, message, data);
     }
 
     public void Dispose()
     {
-        if (_hook != 0) UnhookWindowsHookEx(_hook);
+        if (_threadId != 0) PostThreadMessage(_threadId, 0x0012 /* WM_QUIT */, 0, 0);
     }
 
     private delegate nint HookProc(int code, nint message, nint data);
@@ -179,6 +209,16 @@ public sealed class MouseHook : IDisposable
         public nint ExtraInfo;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG
+    {
+        public nint Hwnd;
+        public uint Message;
+        public nint WParam, LParam;
+        public uint Time;
+        public Input.POINT Point;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern nint SetWindowsHookEx(int id, HookProc proc, nint module, uint threadId);
 
@@ -187,6 +227,18 @@ public sealed class MouseHook : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint CallNextHookEx(nint hook, int code, nint message, nint data);
+
+    [DllImport("user32.dll")]
+    private static extern int GetMessage(out MSG message, nint hwnd, uint min, uint max);
+
+    [DllImport("user32.dll")]
+    private static extern nint DispatchMessage(ref MSG message);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostThreadMessage(uint threadId, uint message, nint wParam, nint lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
 
     [DllImport("kernel32.dll")]
     private static extern nint GetModuleHandle(string? name);

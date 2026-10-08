@@ -111,8 +111,8 @@ public static class Ui
     public static Brush Gold => Theme.Get("Accent");
     public static Brush Ok => Theme.Get("Ok");
     public static Brush Bad => Theme.Get("Bad");
-    /// <summary>보유 줄 배경: Ok를 어두운 면에 옅게 섞은 색.</summary>
-    public static readonly Brush ReadyBack = Brush("#1E3328");
+    /// <summary>보유·지금 가능 줄 배경 (Ok를 어두운 면에 옅게 섞은 색).</summary>
+    public static Brush ReadyBack => Theme.Get("OkTint");
 
     private static readonly Dictionary<string, ImageSource?> Portraits = new(StringComparer.Ordinal);
 
@@ -127,25 +127,19 @@ public static class Ui
         return brush;
     }
 
-    public static Brush GradeBrush(string grade) => grade switch
+    // 등급색: 어두운 면(Ink/Hull/Deck) 위에서 4.5:1 이상 나오도록 밝힌 같은 색상.
+    private static readonly Dictionary<string, Brush> Grades = new()
     {
-        "흔함" => Brush("#9E9E9E"),
-        "안흔함" => Brush("#43A047"),
-        "특별함" => Brush("#1E88E5"),
-        "희귀함" => Brush("#8E24AA"),
-        "전설" => Brush("#FB8C00"),
-        "히든" => Brush("#00897B"),
-        "초월" => Brush("#E53935"),
-        "불멸" => Brush("#AD1457"),
-        "영원" => Brush("#F9A825"),
-        "신비함" or "신비" => Brush("#D81B60"),
-        "제한됨" => Brush("#6D4C41"),
-        "변화된" => Brush("#5E35B1"),
-        "왜곡됨" => Brush("#3949AB"),
-        "특수함" => Brush("#00ACC1"),
-        "세라핌" => Brush("#7CB342"),
-        _ => Brush("#78909C"),
+        ["흔함"] = Brush("#9E9E9E"), ["안흔함"] = Brush("#66BB6A"), ["특별함"] = Brush("#64B5F6"),
+        ["희귀함"] = Brush("#CE93D8"), ["전설"] = Brush("#FFA726"), ["히든"] = Brush("#4DB6AC"),
+        ["초월"] = Brush("#EF6C6C"), ["불멸"] = Brush("#F27AA0"), ["영원"] = Brush("#F9A825"),
+        ["신비함"] = Brush("#F48FB1"), ["신비"] = Brush("#F48FB1"), ["제한됨"] = Brush("#BCAAA4"),
+        ["변화된"] = Brush("#B39DDB"), ["왜곡됨"] = Brush("#9FA8DA"), ["특수함"] = Brush("#26C6DA"),
+        ["세라핌"] = Brush("#9CCC65"),
     };
+    private static readonly Brush OtherGrade = Brush("#90A4AE");
+
+    public static Brush GradeBrush(string grade) => Grades.GetValueOrDefault(grade, OtherGrade);
 
     public static int GradeRank(string grade)
     {
@@ -182,10 +176,10 @@ public static class Ui
         if (image is not null) return new Image { Source = image, Width = size, Height = size, Stretch = Stretch.UniformToFill };
         return new Border
         {
-            Width = size, Height = size, Background = GradeBrush(unit.Grade), CornerRadius = new CornerRadius(4),
+            Width = size, Height = size, Background = GradeBrush(unit.Grade), CornerRadius = new CornerRadius(6),
             Child = new TextBlock
             {
-                Text = unit.Name.Length > 0 ? unit.Name[..1] : "?", Foreground = Brushes.White, FontWeight = FontWeights.Bold,
+                Text = unit.Name.Length > 0 ? unit.Name[..1] : "?", Foreground = Ink, FontWeight = FontWeights.Bold,
                 FontSize = size * 0.4, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
             },
         };
@@ -215,7 +209,7 @@ public static class Ui
         });
         var chip = new Border
         {
-            Child = panel, Padding = new Thickness(3), Margin = new Thickness(0, 0, 4, 4), CornerRadius = new CornerRadius(4),
+            Child = panel, Padding = new Thickness(3), Margin = new Thickness(0, 0, 4, 4), CornerRadius = new CornerRadius(6),
             BorderThickness = new Thickness(1), BorderBrush = border ?? GradeBrush(unit.Grade), Background = Deck,
             ToolTip = Describe(unit),
         };
@@ -230,6 +224,7 @@ public static class Ui
     public static string Describe(Unit unit)
     {
         var lines = new List<string> { $"{unit.Name} · {unit.Tier}" };
+        if (unit.Memo.Length > 0) lines.Add(unit.Memo);
         if (unit.IsWildcard) lines.Add("아무거나 1기: " + string.Join(", ", unit.AnyOf.Select(Name)));
         if (unit.HasRecipe)
             lines.Add("조합: " + string.Join(" + ", unit.Recipe.Select(i => i.Count > 1 ? $"{Name(i.Id)}×{i.Count}" : Name(i.Id))));
@@ -243,7 +238,9 @@ public static class Ui
 
     public static string FormatAbility(string key, JsonElement value) => value.ValueKind switch
     {
+        // 원본 데이터가 일부 표식을 문자열 "true"로 담고 있다.
         JsonValueKind.True => key,
+        JsonValueKind.String when value.GetString() == "true" => key,
         JsonValueKind.Number => $"{key} {value.GetDouble():0.##}",
         _ => $"{key} {value}",
     };
@@ -272,6 +269,31 @@ public static class Ui
         Binding = new System.Windows.Data.Binding(path) { StringFormat = format },
         Width = double.IsNaN(width) ? DataGridLength.Auto : new DataGridLength(width),
     };
+
+    /// <summary>"남은 %" 열: 숫자 + 트랙 없는 6px 막대 (Remaining 0~1에 바인딩, 정렬 가능).</summary>
+    public static DataGridTemplateColumn RemainingColumn()
+    {
+        var text = new FrameworkElementFactory(typeof(TextBlock));
+        text.SetBinding(TextBlock.TextProperty, new System.Windows.Data.Binding("Remaining") { StringFormat = "P0" });
+        text.SetValue(FrameworkElement.WidthProperty, 40.0);
+        text.SetValue(TextBlock.FontFamilyProperty, Application.Current.Resources["NumFont"]);
+        var bar = new FrameworkElementFactory(typeof(ProgressBar));
+        bar.SetBinding(System.Windows.Controls.Primitives.RangeBase.ValueProperty, new System.Windows.Data.Binding("Remaining"));
+        bar.SetValue(System.Windows.Controls.Primitives.RangeBase.MaximumProperty, 1.0);
+        bar.SetValue(FrameworkElement.WidthProperty, 64.0);
+        bar.SetValue(FrameworkElement.HeightProperty, 6.0);
+        bar.SetValue(Control.BackgroundProperty, Brushes.Transparent);
+        bar.SetValue(Control.BorderThicknessProperty, new Thickness(0));
+        var row = new FrameworkElementFactory(typeof(StackPanel));
+        row.SetValue(StackPanel.OrientationProperty, Orientation.Horizontal);
+        row.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
+        row.AppendChild(text);
+        row.AppendChild(bar);
+        return new DataGridTemplateColumn
+        {
+            Header = "남은 %", SortMemberPath = "Remaining", CellTemplate = new DataTemplate { VisualTree = row },
+        };
+    }
 
     public static DataGrid Grid() => new()
     {

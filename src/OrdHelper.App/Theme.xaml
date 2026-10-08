@@ -14,6 +14,8 @@
   <SolidColorBrush x:Key="Lift" Color="#2A3240"/>
   <SolidColorBrush x:Key="Edge" Color="#3A4456"/>
   <SolidColorBrush x:Key="AccentTint" Color="#33E8B84A"/>
+  <SolidColorBrush x:Key="OkTint" Color="#1E3328"/>
+  <SolidColorBrush x:Key="InkGlass" Color="#E610141A"/>
   <FontFamily x:Key="BodyFont">Malgun Gothic, Segoe UI</FontFamily>
   <FontFamily x:Key="NumFont">Bahnschrift, Segoe UI</FontFamily>
 

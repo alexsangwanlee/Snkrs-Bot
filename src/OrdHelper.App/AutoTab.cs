@@ -23,6 +23,7 @@ public sealed class AutoTab : TabBase
     private readonly Ring _ring = new(132, 12);
     private readonly StackPanel _next = new() { VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(24, 0, 0, 0) };
     private readonly Button _toggle;
+    private readonly StackPanel _toggleRow = new() { Orientation = Orientation.Horizontal }; // 버튼은 한 부모에만 붙어 있어야 한다
     private readonly ComboBox _picker = new() { IsEditable = true, Width = 260, Margin = new Thickness(4, 0, 4, 0) };
     private readonly CheckBox _autoGoal = new() { Content = "목표가 없으면 효율 1위로", IsChecked = true, Margin = new Thickness(12, 0, 0, 0) };
     private readonly WrapPanel _goals = new() { Margin = new Thickness(0, 0, 0, 6) };
@@ -30,12 +31,16 @@ public sealed class AutoTab : TabBase
     private readonly StackPanel _side = new() { Margin = new Thickness(12, 0, 4, 12) };
     private readonly DockPanel _view = new() { Margin = new Thickness(0, 8, 0, 8) };
 
-    public AutoTab(AppState state, AutoRunner runner, Func<string> hotkey, Action toggleOverlay) : base(state)
+    public AutoTab(AppState state, AutoRunner runner, Func<string> hotkey) : base(state)
     {
         _runner = runner;
         _hotkey = hotkey;
         _toggle = Ui.Button("", runner.Toggle);
         _toggle.Margin = new Thickness(0);
+        _toggleRow.Children.Add(_toggle);
+        _toggle.ToolTip = "채팅 조합(히든·초월·불멸·영원 등)은 명령어를 직접 입력하고, " +
+                          "단축키 조합은 안내된 유닛을 클릭하면 키를 누릅니다. " +
+                          "패에서 결과를 확인한 뒤 다음 단계로 넘어가고, 확인이 안 되면 새로고침 후 한 번 더 시도합니다.";
         _picker.ItemsSource = Data.Units.Values.Where(u => u.HasRecipe && !u.IsWildcard)
             .OrderByDescending(u => Ui.GradeRank(u.Grade)).ThenBy(u => u.Name).Select(u => new Pick(u)).ToList();
         _autoGoal.Click += (_, _) =>
@@ -59,7 +64,7 @@ public sealed class AutoTab : TabBase
                 State.Goals.Clear();
                 State.Notify();
             }),
-            _autoGoal, Ui.Button("미니 오버레이", toggleOverlay));
+            _autoGoal);
         var top = new StackPanel { Children = { hero, goalRow, _goals } };
         DockPanel.SetDock(top, Dock.Top);
         _view.Children.Add(top);
@@ -94,10 +99,12 @@ public sealed class AutoTab : TabBase
         _side.Children.Clear();
         _next.Children.Clear();
         _toggle.Content = _runner.Armed ? $"자동 실행 끄기 ({_hotkey()})" : $"자동 실행 켜기 ({_hotkey()})";
-        _toggle.Style = _runner.Armed ? null : (Style)Application.Current.Resources["PrimaryButton"];
+        if (_runner.Armed) _toggle.ClearValue(FrameworkElement.StyleProperty); // 기본(테마) 버튼으로
+        else _toggle.Style = (Style)Application.Current.Resources["PrimaryButton"];
+        _ring.Visibility = goals.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (goals.Count == 0)
         {
-            _ring.Set(0);
+            _next.Margin = new Thickness(0);
             _next.Children.Add(Ui.Text("목표를 고르세요", 22, true));
             _next.Children.Add(Ui.Text("조합도우미·효율 추천·유카0 조합 탭에서도 보낼 수 있습니다.", 12, color: Ui.Muted));
             return;
@@ -105,7 +112,8 @@ public sealed class AutoTab : TabBase
 
         var plan = Crafting.Plan(Data, State.Hand, goals);
         _ring.Set(plan.Progress);
-        BuildNext(plan);
+        _next.Margin = new Thickness(24, 0, 0, 0);
+        BuildNext(plan, goals);
 
         if (plan.Steps.Count == 0) _steps.Children.Add(Ui.Text("이미 모두 보유하고 있습니다.", 13, color: Ui.Ok));
         // 지금 가능한 단계는 앞의 지금 가능한 단계에만 기대므로, 위로 모아도 순서가 유지된다.
@@ -126,22 +134,19 @@ public sealed class AutoTab : TabBase
         _side.Children.Add(Header("자원·조건"));
         _side.Children.Add(Ui.Text($"목재 {plan.Lumber} · 골드 {plan.Gold}", 12));
         foreach (var note in plan.Notes) _side.Children.Add(Ui.Text(note, 12, color: Ui.Muted));
-        _side.Children.Add(Header("자동 실행"));
-        _side.Children.Add(Ui.Text(
-            "채팅 조합(히든·초월·불멸·영원 등)은 프로그램이 명령어를 직접 입력합니다. " +
-            "단축키 조합은 안내된 유닛을 클릭하면 프로그램이 키를 누릅니다. " +
-            "패에서 결과가 확인되면 다음 단계로 넘어가고, 확인이 안 되면 새로고침 후 한 번 더 시도합니다.", 12, color: Ui.Muted));
     }
 
     /// <summary>링 오른쪽: 지금 할 행동을 가장 크게.</summary>
-    private void BuildNext(CraftPlan plan)
+    private void BuildNext(CraftPlan plan, IReadOnlyList<string> goals)
     {
         var done = plan.Steps.Count == 0;
         var step = plan.Steps.FirstOrDefault(s => s.Ready);
         _next.Children.Add(Ui.Text(
             done ? "완성" : step is null ? "재료를 모으는 중" : $"다음: {step.Result.Name}", 22, true,
             done ? Ui.Ok : null));
-        _next.Children.Add(Ui.Text($"남은 조합 {plan.Steps.Count}단계 · 지금 가능 {plan.Steps.Count(s => s.Ready)}단계", 12, color: Ui.Muted));
+        _next.Children.Add(Ui.Text(
+            $"{string.Join(", ", goals.Select(Ui.Name))}까지 남은 조합 {plan.Steps.Count}단계 · 지금 가능 {plan.Steps.Count(s => s.Ready)}단계",
+            12, color: Ui.Muted));
         if (step is not null)
         {
             var action = Crafting.Action(Data, step);
@@ -162,10 +167,13 @@ public sealed class AutoTab : TabBase
             }
             _next.Children.Add(line);
         }
-        var status = Ui.Text(_runner.Status, 12, color: _runner.Armed ? Ui.Gold : Ui.Muted);
-        status.Margin = new Thickness(0, 0, 0, 8);
-        _next.Children.Add(status);
-        _next.Children.Add(new StackPanel { Orientation = Orientation.Horizontal, Children = { _toggle } });
+        if (_runner.Armed)
+        {
+            var status = Ui.Text(_runner.Status, 13, true, Ui.Gold);
+            status.Margin = new Thickness(0, 0, 0, 8);
+            _next.Children.Add(status);
+        }
+        _next.Children.Add(_toggleRow);
     }
 
     /// <summary>물리 키처럼 보이는 키캡 (아래 테두리 2px).</summary>
@@ -173,7 +181,7 @@ public sealed class AutoTab : TabBase
     {
         Child = new TextBlock
         {
-            Text = text, FontSize = 20, FontWeight = FontWeights.SemiBold, Foreground = Ui.Sail,
+            Text = text, FontSize = 28, FontWeight = FontWeights.SemiBold, Foreground = Ui.Sail,
             FontFamily = (FontFamily)Application.Current.Resources["NumFont"],
         },
         Background = Ui.Deck, BorderBrush = Ui.Rope, BorderThickness = new Thickness(1, 1, 1, 3),
@@ -184,8 +192,8 @@ public sealed class AutoTab : TabBase
     private Border StepRow(int index, CraftStep step)
     {
         var line = new DockPanel();
-        var number = Ui.Text($"{index,2}. {(step.Ready ? "▶" : "·")}", 13, true, step.Ready ? Ui.Ok : Ui.Muted);
-        number.Width = 52;
+        var number = Ui.Text($"{index}", 13, true, step.Ready ? Ui.Ok : Ui.Muted);
+        number.Width = 32;
         DockPanel.SetDock(number, Dock.Left);
         line.Children.Add(number);
         var face = Ui.Face(step.Result, 28);
@@ -224,7 +232,7 @@ public sealed class OverlayWindow : Window
 {
     private readonly AppState _state;
     private readonly AutoRunner _runner;
-    private readonly Ring _ring = new(48, 6, caption: false);
+    private readonly Ring _ring = new(56, 7);
     private readonly StackPanel _lines = new() { Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
 
     public OverlayWindow(AppState state, AutoRunner runner)
@@ -234,7 +242,8 @@ public sealed class OverlayWindow : Window
         Title = "원랜디 자동 조합";
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
-        Background = Ui.Brush("#E610141A");
+        Background = Theme.Get("InkGlass");
+        ToolTip = "끌어서 이동 · 우클릭으로 닫기";
         Topmost = true;
         ShowInTaskbar = false;
         ShowActivated = false;
@@ -261,9 +270,9 @@ public sealed class OverlayWindow : Window
     {
         _lines.Children.Clear();
         var (goals, _) = _state.EffectiveGoals();
+        _ring.Visibility = goals.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
         if (goals.Count == 0)
         {
-            _ring.Set(0);
             _lines.Children.Add(Line("자동 조합 목표 없음", Ui.Muted));
             return;
         }

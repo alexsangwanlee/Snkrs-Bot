@@ -17,7 +17,7 @@ public sealed class HelperTab : TabBase
     private sealed record Section(string Title, Border Card, CheckBox All, List<Tile> Tiles);
 
     private const int SectionRows = 22;
-    private const double ColumnWidth = 232;
+    private const double ColumnWidth = 220;
     private readonly Dictionary<string, Tile> _tiles = new(StringComparer.Ordinal);
     private readonly List<Section> _sections = [];
     private readonly Grid _board = new() { Margin = new Thickness(0, 0, 8, 12) };
@@ -47,7 +47,7 @@ public sealed class HelperTab : TabBase
                 State.Manual.Clear();
                 State.Notify();
             }),
-            Ui.Text("   체크 = 보유(O) · 줄 클릭 +1 · 우클릭 −1 · 금색 = 지금 조합 가능", 12, color: Ui.Muted));
+            Hint("체크 = 보유(O) · 줄 클릭 +1 · 우클릭 −1 · 금색 = 지금 조합 가능"));
         toolbar.Margin = new Thickness(0, 8, 0, 0);
 
         var scroll = new ScrollViewer { Content = _board, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
@@ -59,7 +59,7 @@ public sealed class HelperTab : TabBase
 
         var right = new ScrollViewer { Content = _side, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Background = Ui.Panel };
         _view.ColumnDefinitions.Add(new ColumnDefinition());
-        _view.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(380) });
+        _view.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(300) });
         Grid.SetColumn(right, 1);
         _view.Children.Add(left);
         _view.Children.Add(right);
@@ -109,7 +109,7 @@ public sealed class HelperTab : TabBase
         var tint = ((SolidColorBrush)color).Color;
         var card = new Border
         {
-            Width = ColumnWidth - 8, Margin = new Thickness(0, 0, 8, 8), CornerRadius = new CornerRadius(8),
+            Width = ColumnWidth - 8, Margin = new Thickness(0, 0, 8, 8), CornerRadius = new CornerRadius(6),
             BorderBrush = color, BorderThickness = new Thickness(1),
             Background = new SolidColorBrush(Color.FromArgb(40, tint.R, tint.G, tint.B)),
             Child = new StackPanel { Children = { header, rows } },
@@ -148,7 +148,7 @@ public sealed class HelperTab : TabBase
         line.Children.Add(name);
         var root = new Border
         {
-            Child = line, Margin = new Thickness(0, 1, 0, 1), Padding = new Thickness(2), CornerRadius = new CornerRadius(3),
+            Child = line, Margin = new Thickness(0, 1, 0, 1), Padding = new Thickness(2), CornerRadius = new CornerRadius(4),
             BorderThickness = new Thickness(2), Cursor = Cursors.Hand, ToolTip = Ui.Describe(unit),
         };
         // 체크박스 클릭은 CheckBox가 처리(Handled)하므로 여기까지 오지 않는다.
@@ -249,7 +249,12 @@ public sealed class HelperTab : TabBase
         _side.Children.Add(ready);
 
         if (_selected is not null && Data.Units.TryGetValue(_selected, out var selected)) BuildDetail(selected, hand);
-        else _side.Children.Add(Ui.Text("\n유닛을 누르면 조합식·상위 조합이 여기에 나옵니다.", 12, color: Ui.Muted));
+        else
+        {
+            var hint = Hint("유닛을 누르면 조합식·상위 조합과 남은 %가 여기에 나옵니다.");
+            hint.Margin = new Thickness(0, 12, 0, 0);
+            _side.Children.Add(hint);
+        }
     }
 
     private void BuildDetail(Unit unit, IReadOnlyDictionary<string, int> hand)
@@ -269,6 +274,16 @@ public sealed class HelperTab : TabBase
 
         if (unit.HasRecipe)
         {
+            // OX 도우미처럼 유닛마다 남은 %를 바로 보여 준다.
+            var plan = Crafting.Plan(Data, hand, [unit.Id]);
+            var ring = new Ring(72, 8) { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 8, 0, 0) };
+            ring.Set(plan.Progress);
+            var ringRow = new StackPanel { Orientation = Orientation.Horizontal, Children = { ring } };
+            var ringText = Ui.Text($"남은 조합 {plan.Steps.Count}단계\n부족 재료 {plan.Missing.Values.Sum()}기", 12, color: Ui.Muted);
+            ringText.Margin = new Thickness(12, 8, 0, 0);
+            ringText.VerticalAlignment = VerticalAlignment.Center;
+            ringRow.Children.Add(ringText);
+            _side.Children.Add(ringRow);
             _side.Children.Add(Heading("조합식"));
             var tree = new TreeView { BorderThickness = new Thickness(0), Background = Brushes.Transparent };
             foreach (var ingredient in unit.Recipe) tree.Items.Add(Node(ingredient.Id, ingredient.Count, hand, 0));
@@ -281,7 +296,7 @@ public sealed class HelperTab : TabBase
             how.Add($"출처: {unit.RecipeSource}");
             foreach (var line in how) _side.Children.Add(Ui.Text(line, 12));
 
-            var actions = Ui.Row(Ui.Button("자동 조합 목표로", () => State.AddGoals([unit.Id])));
+            var actions = Ui.Row(Ui.Button("목표에 추가", () => State.AddGoals([unit.Id])));
             actions.Margin = new Thickness(-4, 8, 0, 0);
             if (!State.IsLive) actions.Children.Add(Ui.Button("가능한 만큼 조합 (OX)", () => CraftInManual(unit.Id)));
             _side.Children.Add(actions);
@@ -351,10 +366,18 @@ public sealed class HelperTab : TabBase
             foreach (var (key, value) in unit.Abilities)
             {
                 if (value.ValueKind == JsonValueKind.Number) numbers[key] = numbers.GetValueOrDefault(key) + value.GetDouble() * count;
-                else if (value.ValueKind == JsonValueKind.True) flags.Add(key);
+                else if (value.ValueKind == JsonValueKind.True || value.ValueKind == JsonValueKind.String && value.GetString() == "true")
+                    flags.Add(key);
             }
         }
         return numbers.Select(p => $"{p.Key} {p.Value:0.##}").Concat(flags);
+    }
+
+    private static TextBlock Hint(string text)
+    {
+        var block = Ui.Text(text, 12, color: Ui.Muted);
+        block.Margin = new Thickness(12, 0, 0, 0);
+        return block;
     }
 
     private static TextBlock Heading(string text)
@@ -367,7 +390,7 @@ public sealed class HelperTab : TabBase
     private static Border Pill(string text) => new()
     {
         Child = new TextBlock { Text = text, FontSize = 12, Foreground = Ui.Sail }, Background = Ui.Deck, BorderBrush = Ui.Rope,
-        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 2, 8, 2),
+        BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(6), Padding = new Thickness(8, 2, 8, 2),
         Margin = new Thickness(0, 0, 4, 4),
     };
 }

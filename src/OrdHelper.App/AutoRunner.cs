@@ -45,9 +45,13 @@ public sealed class AutoRunner
         _failures.Clear();
         if (Armed)
         {
+            // 효율 1위 자동 목표는 켤 때 고정한다: 완성 후 다른 상위로 멋대로 넘어가지 않게.
+            var (goals, auto) = _state.EffectiveGoals();
+            if (auto) _state.Goals.AddRange(goals);
             _hook = new MouseHook(OnClick);
             _timer.Start();
             Tick();
+            if (!_hook.Installed) Report("마우스 훅을 걸지 못해 단축키 조합은 직접 해야 합니다 (채팅 조합은 동작)");
         }
         else
         {
@@ -58,6 +62,9 @@ public sealed class AutoRunner
         }
     }
 
+    /// <summary>목표·설정이 바뀜: 패가 그대로여도 다음 Tick에서 계획을 다시 세운다.</summary>
+    public void Invalidate() => _plannedFor = null;
+
     /// <summary>패가 바뀌었거나 타이머: 확인 대기 중이면 결과를 보고, 아니면 다음 단계를 시작.</summary>
     public void Tick()
     {
@@ -65,7 +72,13 @@ public sealed class AutoRunner
         var hand = _state.Hand;
         if (_pending is { } pending)
         {
-            if (hand.GetValueOrDefault(pending.Step.Result.Id) > pending.Before)
+            // 새로고침 중이라 워크3 패가 없으면 판단을 미룬다 (직접 입력한 OX 패와 비교하면 오판).
+            if (_state.Live is null)
+            {
+                _pending = pending with { Deadline = DateTime.UtcNow + ConfirmTimeout };
+                return;
+            }
+            if (_state.Live.GetValueOrDefault(pending.Step.Result.Id) > pending.Before)
             {
                 _pending = null;
                 _failures.Remove(pending.Step.Result.Id);
@@ -101,16 +114,22 @@ public sealed class AutoRunner
         {
             case ActionKind.Chat when Input.ForegroundWc3() == 0:
                 _plannedFor = null;
-                Report($"워크3 창을 앞에 두면 '{action.Text}' 를 입력합니다");
+                Report($"워크3 창을 앞에 두면 '{action.Text}' 입력");
                 break;
             case ActionKind.Chat:
                 Begin(step);
-                Input.Chat(action.Text);
-                Report($"{step.Result.Name}: 채팅 '{action.Text}' 입력함");
+                if (Input.Chat(action.Text))
+                {
+                    Report($"{step.Result.Name}: 채팅 '{action.Text}' 입력함");
+                    break;
+                }
+                _pending = null;
+                _plannedFor = null;
+                Report("워크3가 맨 앞이 아니어서 입력을 멈췄습니다");
                 break;
             case ActionKind.Key:
                 _awaitingClick = (step, action);
-                Report($"{step.Result.Name}: [{action.Host?.Name}] 를 클릭하면 {action.Text} 를 누릅니다");
+                Report($"{step.Result.Name}: [{action.Host?.Name}] 클릭하면 {action.Text} 키 입력");
                 break;
             default:
                 Report($"{step.Result.Name}: 직접 조합해 주세요 ({Crafting.Instruction(_state.Data, step)})");
@@ -127,7 +146,12 @@ public sealed class AutoRunner
         if (!Armed || _awaitingClick?.Step.Result.Id != waiting.Step.Result.Id) return;
         Begin(waiting.Step);
         _awaitingClick = null;
-        Input.Tap(waiting.Action.Text[0]);
+        if (!Input.Tap(waiting.Action.Text[0]))
+        {
+            _pending = null;
+            _awaitingClick = waiting;
+            return;
+        }
         Report($"{waiting.Step.Result.Name}: {waiting.Action.Text} 누름, 확인 중");
     }
 

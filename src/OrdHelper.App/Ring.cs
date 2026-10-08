@@ -7,14 +7,14 @@ using Ellipse = System.Windows.Shapes.Ellipse;
 
 namespace OrdHelper.App;
 
-/// <summary>완료 비율 링 + 가운데 "남은 %". 값이 바뀔 때만 짧게 움직인다.</summary>
+/// <summary>남은 % 링: 호의 길이 = 남은 양 (조합할수록 줄어든다). 완성되면 초록. 값이 바뀔 때만 짧게 움직인다.</summary>
 public sealed class Ring : Grid
 {
     public static readonly DependencyProperty ValueProperty = DependencyProperty.Register(
         nameof(Value), typeof(double), typeof(Ring), new PropertyMetadata(0.0, (d, _) => ((Ring)d).Draw()));
 
     private readonly Path _arc = new() { StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
-    private readonly TextBlock _number = new() { HorizontalAlignment = HorizontalAlignment.Center, FontFamily = new FontFamily("Bahnschrift, Segoe UI") };
+    private readonly TextBlock _number = new() { HorizontalAlignment = HorizontalAlignment.Center };
     private readonly TextBlock _caption = new() { HorizontalAlignment = HorizontalAlignment.Center, Text = "남음" };
     private readonly double _size, _thickness;
 
@@ -34,6 +34,7 @@ public sealed class Ring : Grid
         _arc.Stroke = Theme.Get("Accent");
         _arc.StrokeThickness = thickness;
         _number.Foreground = Theme.Get("Sail");
+        _number.FontFamily = (FontFamily)Application.Current.Resources["NumFont"];
         _number.FontSize = size * 0.27;
         _number.FontWeight = FontWeights.SemiBold;
         _caption.Foreground = Theme.Get("Fog");
@@ -52,6 +53,8 @@ public sealed class Ring : Grid
     {
         done = Math.Clamp(done, 0, 1);
         _number.Text = $"{Math.Round((1 - done) * 100)}%";
+        _caption.Text = done >= 1 ? "완성" : "남음";
+        _number.Foreground = done >= 1 ? Theme.Get("Ok") : Theme.Get("Sail");
         if (done <= Value || SystemParameters.ClientAreaAnimation == false)
         {
             BeginAnimation(ValueProperty, null);
@@ -66,7 +69,7 @@ public sealed class Ring : Grid
 
     private void Draw()
     {
-        var value = Math.Clamp(Value, 0, 0.9999);
+        var value = Math.Clamp(1 - Value, 0, 0.9999); // 남은 양
         var r = (_size - _thickness) / 2;
         var c = _size / 2;
         var angle = value * 2 * Math.PI;

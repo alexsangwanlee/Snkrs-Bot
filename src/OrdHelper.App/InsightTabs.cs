@@ -39,7 +39,7 @@ public abstract class StatsTab : TabBase
     protected string NextAction(CraftPlan plan)
     {
         var ready = plan.Steps.FirstOrDefault(s => s.Ready);
-        if (ready is not null) return $"▶ {ready.Result.Name}: {Crafting.Instruction(Data, ready)}";
+        if (ready is not null) return $"{ready.Result.Name}: {Crafting.Instruction(Data, ready)}";
         if (plan.Complete) return "완성";
         return "부족: " + string.Join(", ", plan.Missing.OrderByDescending(m => m.Value).Take(3)
             .Select(m => $"{Ui.Name(m.Key)}×{m.Value}"));
@@ -58,12 +58,12 @@ public sealed class EfficiencyTab : StatsTab
     public EfficiencyTab(AppState state) : base(state)
     {
         _grid.Columns.Add(Ui.Column("목표", "Name", width: 130));
+        _grid.Columns.Add(Ui.RemainingColumn());
         _grid.Columns.Add(Ui.Column("등급", "Tier"));
         _grid.Columns.Add(Ui.Column("효율", "Efficiency", "0"));
         _grid.Columns.Add(Ui.Column("유카0 확률", "Rate", "P0"));
         _grid.Columns.Add(Ui.Column("평균 유카", "AvgYuka", "0.0"));
         _grid.Columns.Add(Ui.Column("기록", "Games", "N0"));
-        _grid.Columns.Add(Ui.Column("남은 %", "Remaining", "P0"));
         _grid.Columns.Add(Ui.Column("남은 비용", "Missing", "0"));
         _grid.Columns.Add(Ui.Column("총 비용", "Total", "0"));
         _grid.Columns.Add(Ui.Column("다음 행동", "Next", width: 360));
@@ -73,7 +73,7 @@ public sealed class EfficiencyTab : StatsTab
         {
             Children =
             {
-                Filters(Ui.Button("선택한 목표로 자동 조합", UseSelected)),
+                Filters(Ui.Button("선택한 유닛 목표에 추가", UseSelected)),
                 Ui.Text("효율 = 유카0 확률 ÷ (지금 패에서 더 모아야 할 흔함 환산 비용 + 1), 1위를 100으로. " +
                         "유카0 확률은 그 상위 유닛이 들어간 클리어 기록 중 유카 0으로 끝난 비율(적은 표본 보정). " +
                         "이미 가진 상위는 뺍니다. 더블클릭하면 자동 조합 목표가 됩니다.", 12, color: Ui.Muted),
@@ -116,11 +116,12 @@ public sealed class Yuka0Tab : StatsTab
     public Yuka0Tab(AppState state) : base(state)
     {
         _grid.Columns.Add(Ui.Column("상위 구성", "Name", width: 200));
+        _grid.Columns.Add(Ui.RemainingColumn());
         _grid.Columns.Add(Ui.Column("유카0 확률", "Rate", "P0"));
         _grid.Columns.Add(Ui.Column("유카0 판", "Yuka0", "N0"));
         _grid.Columns.Add(Ui.Column("기록", "Games", "N0"));
         _grid.Columns.Add(Ui.Column("평균 유카", "AvgYuka", "0.0"));
-        _grid.Columns.Add(Ui.Column("남은 %", "Remaining", "P0"));
+
         _grid.Columns.Add(Ui.Column("같이 쓴 유닛", "Support", width: 300));
         _grid.SelectionChanged += (_, _) =>
         {
@@ -196,8 +197,8 @@ public sealed class Yuka0Tab : StatsTab
         _detail.Children.Add(Ui.Text(NextAction(build.Plan), 12));
 
         var buttons = Ui.Row(
-            Ui.Button("상위 유닛을 자동 조합 목표로", () => State.AddGoals(build.Core.Select(u => u.Id))),
-            Ui.Button("같이 쓴 유닛까지", () => State.AddGoals(build.Core.Concat(build.Support.Select(s => s.Unit))
+            Ui.Button("상위 유닛 목표에 추가", () => State.AddGoals(build.Core.Select(u => u.Id))),
+            Ui.Button("같이 쓴 유닛도 추가", () => State.AddGoals(build.Core.Concat(build.Support.Select(s => s.Unit))
                 .Where(u => u.HasRecipe).Select(u => u.Id))));
         buttons.Margin = new Thickness(-4, 10, 0, 0);
         _detail.Children.Add(buttons);
