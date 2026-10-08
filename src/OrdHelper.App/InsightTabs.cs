@@ -50,7 +50,7 @@ public abstract class StatsTab : TabBase
 public sealed class EfficiencyTab : StatsTab
 {
     public sealed record Row(string Id, string Name, string Tier, double Efficiency, double Rate, int Games, double AvgYuka,
-        double Progress, double Missing, double Total, string Next);
+        double Remaining, double Missing, double Total, string Next);
 
     private readonly DataGrid _grid = Ui.Grid();
     private readonly DockPanel _view = new() { Margin = new Thickness(0, 0, 0, 8) };
@@ -63,7 +63,7 @@ public sealed class EfficiencyTab : StatsTab
         _grid.Columns.Add(Ui.Column("유카0 확률", "Rate", "P0"));
         _grid.Columns.Add(Ui.Column("평균 유카", "AvgYuka", "0.0"));
         _grid.Columns.Add(Ui.Column("기록", "Games", "N0"));
-        _grid.Columns.Add(Ui.Column("진행률", "Progress", "P0"));
+        _grid.Columns.Add(Ui.Column("남은 %", "Remaining", "P0"));
         _grid.Columns.Add(Ui.Column("남은 비용", "Missing", "0"));
         _grid.Columns.Add(Ui.Column("총 비용", "Total", "0"));
         _grid.Columns.Add(Ui.Column("다음 행동", "Next", width: 360));
@@ -92,7 +92,7 @@ public sealed class EfficiencyTab : StatsTab
         SyncDifficulty();
         _grid.ItemsSource = Insights.Efficiency(Data, State.Hand, State.Difficulty, MinGames)
             .Select(r => new Row(r.Goal.Id, r.Goal.Name, r.Goal.Tier, r.Efficiency, r.Yuka0Rate, r.Games, r.AvgYuka,
-                r.Plan.Progress, r.Plan.MissingCost, r.Plan.TotalCost, NextAction(r.Plan)))
+                1 - r.Plan.Progress, r.Plan.MissingCost, r.Plan.TotalCost, NextAction(r.Plan)))
             .ToList();
     }
 
@@ -105,7 +105,7 @@ public sealed class EfficiencyTab : StatsTab
 /// <summary>유카0을 볼 수 있는 조합: 클리어 기록의 상위 구성별 유카0 비율.</summary>
 public sealed class Yuka0Tab : StatsTab
 {
-    public sealed record Row(BuildRow Build, string Name, double Rate, int Yuka0, int Games, double AvgYuka, double Progress,
+    public sealed record Row(BuildRow Build, string Name, double Rate, int Yuka0, int Games, double AvgYuka, double Remaining,
         string Support);
 
     private readonly DataGrid _grid = Ui.Grid();
@@ -120,7 +120,7 @@ public sealed class Yuka0Tab : StatsTab
         _grid.Columns.Add(Ui.Column("유카0 판", "Yuka0", "N0"));
         _grid.Columns.Add(Ui.Column("기록", "Games", "N0"));
         _grid.Columns.Add(Ui.Column("평균 유카", "AvgYuka", "0.0"));
-        _grid.Columns.Add(Ui.Column("진행률", "Progress", "P0"));
+        _grid.Columns.Add(Ui.Column("남은 %", "Remaining", "P0"));
         _grid.Columns.Add(Ui.Column("같이 쓴 유닛", "Support", width: 300));
         _grid.SelectionChanged += (_, _) =>
         {
@@ -158,7 +158,7 @@ public sealed class Yuka0Tab : StatsTab
     {
         SyncDifficulty();
         var rows = Insights.Yuka0Builds(Data, State.Hand, State.Difficulty, MinGames)
-            .Select(b => new Row(b, b.Name, b.Yuka0Rate, b.Yuka0, b.Games, b.AvgYuka, b.Plan.Progress,
+            .Select(b => new Row(b, b.Name, b.Yuka0Rate, b.Yuka0, b.Games, b.AvgYuka, 1 - b.Plan.Progress,
                 string.Join(", ", b.Support.Take(5).Select(s => s.Unit.Name))))
             .ToList();
         _grid.ItemsSource = rows;
@@ -188,8 +188,10 @@ public sealed class Yuka0Tab : StatsTab
         _detail.Children.Add(support);
 
         _detail.Children.Add(Header("지금 패에서"));
-        _detail.Children.Add(new ProgressBar { Value = build.Plan.Progress * 100, Height = 10, Margin = new Thickness(0, 2, 0, 4) });
-        _detail.Children.Add(Ui.Text($"진행률 {build.Plan.Progress:P0} · 남은 조합 {build.Plan.Steps.Count}단계 · " +
+        var ring = new Ring(88, 9) { HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 4, 0, 6) };
+        ring.Set(build.Plan.Progress);
+        _detail.Children.Add(ring);
+        _detail.Children.Add(Ui.Text($"남은 조합 {build.Plan.Steps.Count}단계 · " +
                                      $"지금 가능 {build.Plan.Steps.Count(s => s.Ready)}단계", 12));
         _detail.Children.Add(Ui.Text(NextAction(build.Plan), 12));
 

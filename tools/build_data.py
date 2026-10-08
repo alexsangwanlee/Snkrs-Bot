@@ -124,7 +124,8 @@ def ensure(code, name=None, tier=None):
         grade, role = split_tier(tier or guess_tier)
         units[code] = {"id": code, "name": name or guess_name, "grade": grade, "role": role, "recipe": [],
                        "gold": 0, "lumber": 0, "notes": [], "key": "", "hosts": [], "commands": [],
-                       "abilities": {}, "description": "", "recipeSource": "", "anyOf": [], "memo": ""}
+                       "abilities": {}, "description": "", "recipeSource": "", "anyOf": [], "memo": "",
+                       "targeted": False}
     return units[code]
 
 
@@ -139,7 +140,9 @@ def note_for(code, count):
     if code == "seraphim_any":
         return "세라핌 아무거나 1"
     u = catalog.get(code)
-    return f"{u['name'] if u else code} {count}" + (" (아이템)" if u and u["tier"] == "아이템" else "")
+    if u is None:
+        return f"맵 전용 아이템 {count}개 필요"
+    return f"{u['name']} {count}" + (" (아이템)" if u["tier"] == "아이템" else "")
 
 
 for code, c in catalog.items():
@@ -171,7 +174,7 @@ for r in recipes["recipes"]:
     code = rev(out_id)
     if (out_id in active and active[out_id] != r["recipeId"]) or code in ALIASES:
         continue
-    ing, gold, lumber, notes = collections.Counter(), 0, 0, []
+    ing, gold, lumber, notes, targeted = collections.Counter(), 0, 0, [], False
     for c in r["conditions"]:
         kind = c["kind"]
         if kind == "UNIT":
@@ -183,11 +186,12 @@ for r in recipes["recipes"]:
         elif kind == "ITEM":
             notes.append(note_for(rev(c["id"]), c["count"]))
         elif kind in CONDITION_LABEL:
+            targeted |= kind == "PICK"  # 대상 유닛을 클릭해 시전해야 하는 조합
             label = c.get("label") or CONDITION_LABEL[kind]
             if label not in notes:
                 notes.append(label)
     ensure(code).update(recipe=[{"id": k, "count": v} for k, v in ing.items()], gold=gold, lumber=lumber,
-                        notes=notes, recipeSource=f"맵 {MAP_VERSION}")
+                        notes=notes, targeted=targeted, recipeSource=f"맵 {MAP_VERSION}")
 for u in list(units.values()):
     for i in u["recipe"]:
         ensure(i["id"])

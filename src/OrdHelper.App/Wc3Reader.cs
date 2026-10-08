@@ -45,6 +45,7 @@ public sealed class Wc3Reader : IDisposable
     private ulong _root;
     private int _emptyReads;
     private DateTime _nextScan = DateTime.MinValue;
+    private int _errors;
 
     public Wc3Reader(GameData data) => _data = data;
 
@@ -66,6 +67,7 @@ public sealed class Wc3Reader : IDisposable
             // 판이 바뀌면 풀 위치가 바뀔 수 있다. 계속 비어 있으면 다시 찾는다.
             _emptyReads = hand.Count == 0 ? _emptyReads + 1 : 0;
             if (_emptyReads > 10) { _root = 0; _emptyReads = 0; }
+            _errors = 0;
             var tag = _layout!.Verified ? "" : " · 미검증 빌드(실험)";
             return new($"WC3 {_version} · {local + 1}P · 유닛 {hand.Values.Sum()}{tag}", hand);
         }
@@ -73,7 +75,9 @@ public sealed class Wc3Reader : IDisposable
                                       or OverflowException or ArgumentOutOfRangeException)
         {
             _root = 0;
-            return new($"WC3 읽기 실패: {e.Message}", null, true);
+            // 연속으로 실패하면 프로세스에 처음부터 다시 붙는다 (게임 재시작·맵 변경 대응).
+            if (++_errors >= 3) Reset();
+            return new($"WC3 읽기 실패, 다시 연결 중: {e.Message}", null, true);
         }
     }
 
@@ -101,6 +105,9 @@ public sealed class Wc3Reader : IDisposable
         }
     }
 
+    /// <summary>다음 읽기에서 프로세스·유닛 풀을 처음부터 다시 찾는다.</summary>
+    public void Reset() => Detach();
+
     private void Detach()
     {
         _memory?.Dispose();
@@ -108,6 +115,8 @@ public sealed class Wc3Reader : IDisposable
         _processId = -1;
         _root = 0;
         _vftables = null;
+        _errors = 0;
+        _nextScan = DateTime.MinValue;
     }
 
     private bool LocateRoot()
@@ -174,16 +183,23 @@ public sealed class Wc3Reader : IDisposable
         var units = new Dictionary<ulong, byte>();
         var structs = new List<(ulong Address, int Count, ulong Entries)>();
         var gate = new object();
-        Parallel.ForEach(_memory!.PrivateRegions(), new ParallelOptions { MaxDegreeOfParallelism = 8 },
-            () => (Units: new Dictionary<ulong, byte>(), Structs: new List<(ulong, int, ulong)>()),
+        // 수 GB 힙을 훑는다. 게임이 끊기지 않게 스레드 2개·낮은 우선순위·버퍼 재사용
+        // (원랜디 조합도우미의 "연동 시 렉/튕김" 문제를 피하려는 것).
+        Parallel.ForEach(_memory!.PrivateRegions(), new ParallelOptions { MaxDegreeOfParallelism = 2 },
+            () =>
+            {
+                Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+                return (Units: new Dictionary<ulong, byte>(), Structs: new List<(ulong, int, ulong)>(), Buffer: new byte[ProcessMemory.ChunkBytes]);
+            },
             (region, _, local) =>
             {
-                foreach (var (chunk, buffer) in _memory.ReadChunks(region))
-                    ScanBuffer(chunk, buffer, layout, vftables, local.Units, local.Structs);
+                foreach (var (chunk, length) in _memory.ReadChunks(region, local.Buffer))
+                    ScanBuffer(chunk, local.Buffer, length, layout, vftables, local.Units, local.Structs);
                 return local;
             },
             local =>
             {
+                Thread.CurrentThread.Priority = ThreadPriority.Normal;
                 lock (gate)
                 {
                     foreach (var pair in local.Units) units[pair.Key] = pair.Value;
@@ -222,13 +238,13 @@ public sealed class Wc3Reader : IDisposable
     }
 
     /// <summary>오프셋이 모두 8의 배수라 qword 배열로 훑는다. 이 루프가 스캔 시간 대부분.</summary>
-    private static void ScanBuffer(ulong chunk, byte[] buffer, Wc3Layout layout, HashSet<ulong> vftables,
+    private static void ScanBuffer(ulong chunk, byte[] buffer, int length, Wc3Layout layout, HashSet<ulong> vftables,
         Dictionary<ulong, byte> units, List<(ulong, int, ulong)> structs)
     {
-        var words = MemoryMarshal.Cast<byte, ulong>(buffer.AsSpan(0, buffer.Length & ~7));
+        var words = MemoryMarshal.Cast<byte, ulong>(buffer.AsSpan(0, length & ~7));
         var countWord = layout.CountOffset / 8;
         var entriesWord = layout.EntriesOffset / 8;
-        var unitLimit = (buffer.Length - layout.OwnerOffset - 1) / 8;
+        var unitLimit = (length - layout.OwnerOffset - 1) / 8;
         for (var i = 0; i < words.Length; i++)
         {
             var value = words[i];
@@ -268,7 +284,7 @@ internal sealed class ProcessMemory : IDisposable
     public static ProcessMemory Open(int processId)
     {
         var handle = OpenProcess(0x0010 | 0x0400, false, processId); // VM_READ | QUERY_INFORMATION
-        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "워크래프트3 프로세스를 열 수 없습니다.");
+        if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error(), "워크래프트3 프로세스를 열 수 없습니다. 워크3가 관리자 권한이면 이 프로그램도 관리자로 실행하세요.");
         return new ProcessMemory(handle);
     }
 
@@ -310,16 +326,26 @@ internal sealed class ProcessMemory : IDisposable
             return (start, Math.Min(r.Base + r.Size, moduleBase + (ulong)moduleSize) - start);
         });
 
-    public IEnumerable<(ulong Base, byte[] Buffer)> ReadChunks((ulong Base, ulong Size) region)
+    public const int ChunkBytes = 16 * 1024 * 1024;
+
+    /// <summary>영역을 buffer 크기 조각으로 읽어 (시작 주소, 읽은 길이)를 돌려준다. buffer는 호출자가 재사용.</summary>
+    public IEnumerable<(ulong Base, int Length)> ReadChunks((ulong Base, ulong Size) region, byte[] buffer)
     {
-        const int chunk = 16 * 1024 * 1024, overlap = 0x2000;
+        const int overlap = 0x2000;
         for (ulong position = 0; position < region.Size;)
         {
-            var length = (int)Math.Min(chunk, region.Size - position);
-            var buffer = ReadAvailable(region.Base + position, length);
-            if (buffer.Length >= 0x1000) yield return (region.Base + position, buffer);
+            var length = (int)Math.Min((ulong)buffer.Length, region.Size - position);
+            var read = ReadInto(region.Base + position, buffer, length);
+            if (read >= 0x1000) yield return (region.Base + position, read);
             position += (ulong)Math.Max(length - overlap, 0x1000);
         }
+    }
+
+    private int ReadInto(ulong address, byte[] buffer, int count)
+    {
+        if (!IsUserAddress(address)) return 0;
+        ReadProcessMemory(_handle, (nint)address, buffer, count, out var read);
+        return (int)Math.Clamp(read, 0, count);
     }
 
     private IEnumerable<(ulong Base, ulong Size, uint Type)> Regions(ulong from, ulong to)

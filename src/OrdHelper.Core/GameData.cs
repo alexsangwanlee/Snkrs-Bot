@@ -26,6 +26,8 @@ public sealed class Unit
     /// <summary>OX 조합기식 짧은 능력 요약 (예: "0.5스턴 깍11").</summary>
     public string Memo { get; init; } = "";
     public string RecipeSource { get; init; } = "";
+    /// <summary>대상 유닛을 클릭해 시전해야 하는 조합 (랜덤전용 유닛 지정).</summary>
+    public bool Targeted { get; init; }
     /// <summary>선택 재료: 이 중 아무 유닛 1기로 대신한다.</summary>
     public List<string> AnyOf { get; init; } = [];
 

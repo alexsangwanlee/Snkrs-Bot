@@ -1,5 +1,10 @@
 namespace OrdHelper.Core;
 
+public enum ActionKind { Chat, Key, Manual }
+
+/// <summary>Chat: Text를 채팅으로 입력. Key: Host를 선택하고 Text 키. Manual: 프로그램이 할 수 없음.</summary>
+public sealed record CraftAction(ActionKind Kind, string Text, Unit? Host);
+
 /// <summary>조합 한 번. Uses는 선택 재료까지 실제 유닛으로 정해진 소모 재료.</summary>
 public sealed record CraftStep(Unit Result, IReadOnlyList<Ingredient> Uses, bool Ready);
 
@@ -120,19 +125,37 @@ public static class Crafting
             missing.Sum(pair => pair.Value * data.BaseCost(pair.Key)));
     }
 
-    /// <summary>단계 실행 안내: 어떤 유닛을 선택하고 어떤 키(또는 채팅)를 쓰는지.</summary>
-    public static string Instruction(GameData data, CraftStep step)
+    /// <summary>
+    /// 단계를 게임에서 어떻게 실행하는가. 맵 스크립트 기준:
+    /// 채팅 명령은 선택 없이 보유 재료를 맵 전체에서 세어 조합하고,
+    /// 단축키는 Host 유닛이 선택된 상태에서 시전해야 한다. 대상 지정형은 직접.
+    /// </summary>
+    public static CraftAction Action(GameData data, CraftStep step)
     {
         var unit = step.Result;
-        if (unit.Key.Length > 0)
+        if (unit.Commands.Count > 0)
+            // 영문 별칭(ASCII)이 한/영 상태 영향을 덜 받는다.
+            return new CraftAction(ActionKind.Chat, unit.Commands.FirstOrDefault(c => c.All(char.IsAscii)) ?? unit.Commands[0], null);
+        if (unit.Key.Length > 0 && !unit.Targeted)
         {
             var host = unit.Hosts.FirstOrDefault(h => step.Uses.Any(u => u.Id == h))
                        ?? unit.Hosts.FirstOrDefault() ?? step.Uses.FirstOrDefault()?.Id;
-            var hostName = host is null ? "재료" : data.Find(host)?.Name ?? host;
-            return $"[{hostName}] 선택 → {unit.Key}";
+            return new CraftAction(ActionKind.Key, unit.Key, host is null ? null : data.Find(host));
         }
-        if (unit.Commands.Count > 0) return $"채팅: {unit.Commands[0]}";
-        return "게임 내 조합 메뉴에서 선택";
+        return new CraftAction(ActionKind.Manual, unit.Key, null);
+    }
+
+    /// <summary>단계 실행 안내 한 줄.</summary>
+    public static string Instruction(GameData data, CraftStep step)
+    {
+        var action = Action(data, step);
+        return action.Kind switch
+        {
+            ActionKind.Chat => $"채팅: {action.Text}",
+            ActionKind.Key => $"[{action.Host?.Name ?? "재료"}] 선택 → {action.Text}",
+            _ when step.Result.Targeted => $"{action.Text} 후 랜덤전용 유닛 클릭 (직접)",
+            _ => "게임 내 조합 메뉴에서 선택 (직접)",
+        };
     }
 
     private static bool IsWildcard(GameData data, string id) =>

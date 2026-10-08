@@ -97,6 +97,23 @@ public class CoreTests
     }
 
     [Fact]
+    public void ActionsFollowMapRules()
+    {
+        var data = new GameData(
+        [
+            new Unit { Id = "a", Name = "A", Grade = "흔함" },
+            new Unit { Id = "k", Name = "K", Recipe = [new("a", 2)], Key = "Z", Hosts = ["a"] },
+            new Unit { Id = "c", Name = "C", Recipe = [new("k", 1)], Commands = ["한글명령", "cmd tr"] },
+            new Unit { Id = "p", Name = "P", Recipe = [new("a", 1)], Key = "Z", Hosts = ["a"], Targeted = true },
+        ]);
+        var plan = Crafting.Plan(data, Hand(("a", 2)), ["c"]);
+        Assert.Equal(new CraftAction(ActionKind.Key, "Z", data.Units["a"]), Crafting.Action(data, plan.Steps[0]));
+        Assert.Equal(new CraftAction(ActionKind.Chat, "cmd tr", null), Crafting.Action(data, plan.Steps[1]));
+        var pick = Crafting.Plan(data, Hand(("a", 1)), ["p"]).Steps[0];
+        Assert.Equal(ActionKind.Manual, Crafting.Action(data, pick).Kind);
+    }
+
+    [Fact]
     public void BundledDataIsConsistent()
     {
         var data = GameData.Load(Path.Combine(AppContext.BaseDirectory, "Data", "ord-data.json"));
@@ -109,6 +126,9 @@ public class CoreTests
         Assert.Equal(("Z", "300h"), (ace.Key, ace.Hosts[0]));
         Assert.Equal("H90H", data.Canonical("G90H"));
         Assert.True(data.Units["T80H"].IsWildcard);
+        // 맵 스크립트상 채팅 조합과 단축키 조합은 겹치지 않는다.
+        Assert.DoesNotContain(data.Units.Values, u => u.Commands.Count > 0 && u.Key.Length > 0);
+        Assert.Equal(6, data.Units.Values.Count(u => u.Targeted));
 
         var builds = Insights.Yuka0Builds(data, new Dictionary<string, int>());
         Assert.NotEmpty(builds);

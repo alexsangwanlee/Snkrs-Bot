@@ -16,5 +16,6 @@
     <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
     <ProjectReference Include="..\OrdHelper.Core\OrdHelper.Core.csproj" />
     <Content Include="..\..\Data\**\*" LinkBase="Data" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Theme.xaml" LogicalName="OrdHelper.App.Theme.xaml" />
   </ItemGroup>
 </Project>

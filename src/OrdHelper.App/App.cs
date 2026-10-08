@@ -13,6 +13,7 @@ public static class Program
     public static void Main()
     {
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        Theme.Apply(app);
         GameData data;
         try
         {
@@ -25,7 +26,32 @@ public static class Program
             return;
         }
         Ui.Data = data;
+        // 예상 못 한 오류로 꺼지지 않게: 기록하고 화면을 새로고침한다.
+        app.DispatcherUnhandledException += (_, e) =>
+        {
+            e.Handled = true;
+            (app.MainWindow as MainWindow)?.Recover(e.Exception);
+        };
+        TaskScheduler.UnobservedTaskException += (_, e) =>
+        {
+            Log(e.Exception);
+            e.SetObserved();
+        };
         app.Run(new MainWindow(new AppState(data)));
+    }
+
+    public static readonly string LogPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrdHelper", "error.log");
+
+    public static void Log(Exception error)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(LogPath)!);
+            File.AppendAllText(LogPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {error}\n\n");
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 }
 
@@ -57,11 +83,11 @@ public sealed class AppState(GameData data)
         ShowTab(3);
     }
 
-    /// <summary>자동 조합에 쓸 목표. 비어 있고 자동 선택이 켜져 있으면 효율 1위.</summary>
+    /// <summary>자동 조합에 쓸 목표. 비어 있고 자동 선택이 켜져 있으면 효율 1위 (자동 실행이 끝까지 못 하는 대상 지정형 제외).</summary>
     public (IReadOnlyList<string> Goals, bool Auto) EffectiveGoals()
     {
         if (Goals.Count > 0 || !AutoGoal) return (Goals, false);
-        var best = Insights.Efficiency(Data, Hand, Difficulty).FirstOrDefault();
+        var best = Insights.Efficiency(Data, Hand, Difficulty).FirstOrDefault(r => !r.Goal.Targeted);
         return (best is null ? [] : [best.Goal.Id], true);
     }
 }
@@ -75,12 +101,18 @@ public static class Ui
         "변화된", "왜곡됨", "특수함", "해적선", "세라핌", "랜덤유닛", "기타",
     ];
 
-    public static readonly Brush Ok = Brush("#2E7D32");
-    public static readonly Brush Bad = Brush("#C62828");
-    public static readonly Brush Muted = Brush("#757575");
-    public static readonly Brush Gold = Brush("#E0A800");
-    public static readonly Brush ReadyBack = Brush("#E8F5E9");
-    public static readonly Brush Panel = Brush("#F5F6F8");
+    // 색은 Theme.xaml 한 곳에서 정한다 (design-plan: Ink/Hull/Deck/Rope/Sail/Fog + Accent 하나).
+    public static Brush Ink => Theme.Get("Ink");
+    public static Brush Panel => Theme.Get("Hull");
+    public static Brush Deck => Theme.Get("Deck");
+    public static Brush Rope => Theme.Get("Rope");
+    public static Brush Sail => Theme.Get("Sail");
+    public static Brush Muted => Theme.Get("Fog");
+    public static Brush Gold => Theme.Get("Accent");
+    public static Brush Ok => Theme.Get("Ok");
+    public static Brush Bad => Theme.Get("Bad");
+    /// <summary>보유 줄 배경: Ok를 어두운 면에 옅게 섞은 색.</summary>
+    public static readonly Brush ReadyBack = Brush("#1E3328");
 
     private static readonly Dictionary<string, ImageSource?> Portraits = new(StringComparer.Ordinal);
 
@@ -162,7 +194,7 @@ public static class Ui
     public static TextBlock Text(string text, double size = 13, bool bold = false, Brush? color = null) => new()
     {
         Text = text, FontSize = size, FontWeight = bold ? FontWeights.SemiBold : FontWeights.Normal,
-        Foreground = color ?? Brushes.Black, TextWrapping = TextWrapping.Wrap,
+        Foreground = color ?? Sail, TextWrapping = TextWrapping.Wrap,
     };
 
     public static Button Button(string text, Action onClick)
@@ -184,7 +216,7 @@ public static class Ui
         var chip = new Border
         {
             Child = panel, Padding = new Thickness(3), Margin = new Thickness(0, 0, 4, 4), CornerRadius = new CornerRadius(4),
-            BorderThickness = new Thickness(1), BorderBrush = border ?? GradeBrush(unit.Grade), Background = Brushes.White,
+            BorderThickness = new Thickness(1), BorderBrush = border ?? GradeBrush(unit.Grade), Background = Deck,
             ToolTip = Describe(unit),
         };
         if (onClick is not null)
@@ -245,6 +277,6 @@ public static class Ui
     {
         AutoGenerateColumns = false, IsReadOnly = true, SelectionMode = DataGridSelectionMode.Single,
         HeadersVisibility = DataGridHeadersVisibility.Column, GridLinesVisibility = DataGridGridLinesVisibility.Horizontal,
-        CanUserAddRows = false, AlternatingRowBackground = Brush("#FAFAFA"), RowHeight = 26,
+        CanUserAddRows = false, RowHeight = 28,
     };
 }

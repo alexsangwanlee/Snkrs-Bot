@@ -131,7 +131,7 @@ public sealed class HelperTab : TabBase
         var count = new TextBlock { FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Ui.Ok, VerticalAlignment = VerticalAlignment.Center };
         var memo = new TextBlock
         {
-            Text = unit.Memo, FontSize = 10, Foreground = Ui.Brush("#1565C0"), TextTrimming = TextTrimming.CharacterEllipsis,
+            Text = unit.Memo, FontSize = 10, Foreground = Ui.Muted, TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 0, 0), MaxWidth = 92,
         };
         var name = new TextBlock
@@ -194,8 +194,8 @@ public sealed class HelperTab : TabBase
             tile.Check.IsChecked = count > 0;
             tile.Check.IsEnabled = !State.IsLive;
             tile.Count.Text = count > 1 ? $"×{count}" : "";
-            tile.Root.Background = count > 0 ? Ui.ReadyBack : Brushes.White;
-            tile.Root.BorderBrush = tile.Unit.Id == _selected ? Brushes.OrangeRed : canCraft ? Ui.Gold : Brushes.Transparent;
+            tile.Root.Background = count > 0 ? Ui.ReadyBack : Ui.Panel;
+            tile.Root.BorderBrush = tile.Unit.Id == _selected ? Ui.Sail : canCraft ? Ui.Gold : Brushes.Transparent;
         }
         foreach (var section in _sections)
         {
@@ -307,7 +307,7 @@ public sealed class HelperTab : TabBase
         header.Children.Add(new TextBlock
         {
             Text = $" {(ok ? "✔" : "✘")} {unit.Name}  {have}/{need}", VerticalAlignment = VerticalAlignment.Center,
-            Foreground = ok ? Ui.Ok : unit.HasRecipe || unit.IsWildcard ? Brushes.Black : Ui.Bad,
+            Foreground = ok ? Ui.Ok : unit.HasRecipe || unit.IsWildcard ? Ui.Sail : Ui.Bad,
         });
         var item = new TreeViewItem { Header = header, IsExpanded = !ok && depth < 2, ToolTip = Ui.Describe(unit) };
         item.MouseDoubleClick += (_, e) =>
@@ -366,7 +366,7 @@ public sealed class HelperTab : TabBase
 
     private static Border Pill(string text) => new()
     {
-        Child = new TextBlock { Text = text, FontSize = 12 }, Background = Brushes.White, BorderBrush = Ui.Brush("#CFD8DC"),
+        Child = new TextBlock { Text = text, FontSize = 12, Foreground = Ui.Sail }, Background = Ui.Deck, BorderBrush = Ui.Rope,
         BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 2, 8, 2),
         Margin = new Thickness(0, 0, 4, 4),
     };
